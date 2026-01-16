@@ -51,16 +51,47 @@
       font-size: 24px;
       margin-bottom: 10px;
     }
+
+    .settings-btn {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      width: 100%;
+      margin: 10px 0;
+      font-weight: 600;
+    }
+
+    .settings-btn:hover {
+      background: #45a049;
+    }
+
+    .ai-status {
+      font-size: 12px;
+      padding: 8px;
+      background: #e7f3ff;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
   </style>
 </head>
 <body>
   <div class="icon">🏠</div>
   <h1>Rental Safety Checker</h1>
-  <p>This extension helps you spot scams on Facebook Marketplace rental listings.</p>
-  
+  <p>AI-powered scam detection for Facebook Marketplace rentals.</p>
+
   <div class="status active" id="status">
     ✅ Active and monitoring
   </div>
+
+  <div class="ai-status" id="aiStatus">
+    🤖 Checking AI status...
+  </div>
+
+  <button class="settings-btn" id="settingsBtn">⚙️ Configure AI Settings</button>
   
   <p><strong>How it works:</strong></p>
   <p>Visit any Facebook Marketplace rental listing and the extension will automatically analyze it for red flags.</p>

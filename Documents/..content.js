@@ -35,15 +35,98 @@ function checkIfRentalListing() {
 }
 
 // Analyze the listing for red flags
-function analyzeListing() {
+async function analyzeListing() {
   const listingData = extractListingData();
   const redFlags = detectRedFlags(listingData);
   const safetyScore = calculateSafetyScore(redFlags);
 
   console.log('📊 Analysis complete:', { listingData, redFlags, safetyScore });
 
-  // Display the results on the page
-  displaySafetyWidget(safetyScore, redFlags);
+  // Display initial results on the page
+  displaySafetyWidget(safetyScore, redFlags, null);
+
+  // Request AI analysis in background
+  try {
+    const aiAnalysis = await requestAIAnalysis(listingData);
+    if (aiAnalysis && aiAnalysis.aiEnabled) {
+      // Combine AI insights with pattern-based detection
+      const enhancedFlags = enhanceWithAI(redFlags, aiAnalysis);
+      const enhancedScore = calculateEnhancedScore(safetyScore, aiAnalysis);
+
+      console.log('🤖 AI Analysis complete:', aiAnalysis);
+
+      // Update widget with AI insights
+      displaySafetyWidget(enhancedScore, enhancedFlags, aiAnalysis);
+    }
+  } catch (error) {
+    console.warn('AI analysis failed:', error);
+  }
+}
+
+// Request AI analysis from background script
+function requestAIAnalysis(listingData) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: 'analyzeWithAI', data: listingData },
+      response => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else if (response.success) {
+          resolve(response.analysis);
+        } else {
+          reject(new Error(response.error));
+        }
+      }
+    );
+  });
+}
+
+// Enhance red flags with AI insights
+function enhanceWithAI(redFlags, aiAnalysis) {
+  const enhanced = [...redFlags];
+
+  // Add AI-detected red flags
+  if (aiAnalysis.redFlags && aiAnalysis.redFlags.length > 0) {
+    aiAnalysis.redFlags.forEach(flag => {
+      enhanced.push({
+        severity: 'high',
+        message: `🤖 AI detected: ${flag}`,
+        category: 'ai-detection'
+      });
+    });
+  }
+
+  // Add price assessment from AI
+  if (aiAnalysis.priceAssessment === 'scam') {
+    enhanced.push({
+      severity: 'critical',
+      message: `🤖 AI Assessment: Price is likely a scam (Fair market: $${aiAnalysis.fairMarketRent.min}-$${aiAnalysis.fairMarketRent.max})`,
+      category: 'ai-price'
+    });
+  } else if (aiAnalysis.priceAssessment === 'too-low') {
+    enhanced.push({
+      severity: 'medium',
+      message: `🤖 AI Assessment: Below market rate (Fair: $${aiAnalysis.fairMarketRent.min}-$${aiAnalysis.fairMarketRent.max})`,
+      category: 'ai-price'
+    });
+  } else if (aiAnalysis.priceAssessment === 'fair') {
+    enhanced.push({
+      severity: 'info',
+      message: `🤖 AI Assessment: Fair price for ${aiAnalysis.propertyType} (~${aiAnalysis.estimatedSqFt} sq ft)`,
+      category: 'ai-price'
+    });
+  }
+
+  return enhanced;
+}
+
+// Calculate enhanced score with AI input
+function calculateEnhancedScore(patternScore, aiAnalysis) {
+  // Weight: 60% pattern-based, 40% AI
+  const aiScore = aiAnalysis.scamRiskScore || patternScore;
+  const combined = (patternScore * 0.6) + (aiScore * 0.4);
+
+  return Math.round(combined);
 }
 
 // Extract data from the listing
@@ -53,7 +136,9 @@ function extractListingData() {
     description: '',
     price: '',
     location: '',
-    sellerInfo: ''
+    sellerInfo: '',
+    squareFootage: null,
+    bedrooms: null
   };
 
   // Get ALL text from the page
@@ -68,13 +153,33 @@ function extractListingData() {
   }
 
   // Try to find the price - look for $ followed by numbers
-  // Match patterns like: $1200/month, $800/mo, $50/week, $1,200/Month, $1/month, etc.
-  // Try multiple strategies for better accuracy
-  let priceMatch = pageText.match(/\$\d{1,5}(,\d{3})*(\.\d{2})?\s*(\/\s*)?(month|mo|week|wk|per month)/i);
+  // PRIORITY: Match prices with explicit rental periods first (most reliable)
+  // Try multiple patterns in order of reliability
+  let priceMatch = null;
+
+  // Pattern 1: Price with comma + period (e.g., "$1,150 / Month", "$2,500/mo")
+  priceMatch = pageText.match(/\$\d{1,3},\d{3}(\.\d{2})?\s*(\/\s*)?(month|mo|week|wk|per month)/i);
+
+  // Pattern 2: Price without comma + period (e.g., "$700/month", "$850 / mo")
   if (!priceMatch) {
-    // Fallback: just look for any price with $ sign
-    priceMatch = pageText.match(/\$\d{1,5}(,\d{3})*(\.\d{2})?/);
+    priceMatch = pageText.match(/\$\d{3,5}(\.\d{2})?\s*(\/\s*)?(month|mo|week|wk|per month)/i);
   }
+
+  // Pattern 3: Any price with rental period (fallback)
+  if (!priceMatch) {
+    priceMatch = pageText.match(/\$\d{1,5}\s*(\/\s*)?(month|mo|week|wk|per month)/i);
+  }
+
+  // Pattern 4: Just dollar amount with comma (e.g., "$1,150")
+  if (!priceMatch) {
+    priceMatch = pageText.match(/\$\d{1,3},\d{3}(\.\d{2})?/);
+  }
+
+  // Pattern 5: Last resort - any dollar amount 3+ digits
+  if (!priceMatch) {
+    priceMatch = pageText.match(/\$\d{3,5}(\.\d{2})?/);
+  }
+
   if (priceMatch) {
     data.price = priceMatch[0];
   }
@@ -90,6 +195,39 @@ function extractListingData() {
   }
   if (locationMatch) {
     data.location = locationMatch[0];
+  }
+
+  // Try to find square footage
+  const sqftMatch = pageText.match(/(\d{1,4})\s*(sq\.?\s*ft|sqft|square feet)/i);
+  if (sqftMatch) {
+    data.squareFootage = parseInt(sqftMatch[1]);
+  }
+
+  // Try to find number of bedrooms
+  const bedroomMatch = pageText.match(/(\d+)\s*(bed|bedroom|br|bd)/i);
+  if (bedroomMatch) {
+    data.bedrooms = parseInt(bedroomMatch[1]);
+  }
+
+  // Try to find room dimensions (e.g., "10x12", "10' x 12'")
+  const dimensionMatch = pageText.match(/(\d{1,2})\s*[xX×]\s*(\d{1,2})\s*(ft|feet|')?/);
+  if (dimensionMatch && !data.squareFootage) {
+    const length = parseInt(dimensionMatch[1]);
+    const width = parseInt(dimensionMatch[2]);
+    data.squareFootage = length * width;
+  }
+
+  // If no square footage found, estimate based on listing type
+  if (!data.squareFootage) {
+    const lowerText = pageText.toLowerCase();
+    if (lowerText.includes('studio')) {
+      data.squareFootage = 450; // Typical studio size
+    } else if (lowerText.includes('private room') || lowerText.includes('room for rent')) {
+      data.squareFootage = 150; // Typical bedroom size
+    } else if (data.bedrooms) {
+      // Estimate based on bedrooms
+      data.squareFootage = 400 + (data.bedrooms * 300); // Base + bedrooms
+    }
   }
 
   console.log('Extracted data:', data);
@@ -126,13 +264,37 @@ function detectRedFlags(data) {
     }
   });
 
-  // Red Flag 3: Too good to be true pricing
+  // Red Flag 3: Too good to be true pricing (location-aware)
   if (data.price) {
-    const priceMatch = data.price.match(/\$(\d+)/);
+    // Remove commas and extract the number (e.g., "$1,150" -> 1150)
+    const priceMatch = data.price.match(/\$([\d,]+)/);
     if (priceMatch) {
-      const price = parseInt(priceMatch[1]);
+      const price = parseInt(priceMatch[1].replace(/,/g, ''));
+
+      // Get location-based price thresholds
+      const location = (data.location || '').toLowerCase();
+      let minRealisticPrice = 400; // Default minimum for USA
+
+      // Virginia-specific pricing intelligence
+      const virginiaHighCostAreas = ['arlington', 'fairfax', 'alexandria', 'reston', 'falls church', 'mclean', 'vienna', 'tysons'];
+      const virginiaMidCostAreas = ['richmond', 'virginia beach', 'norfolk', 'chesapeake', 'newport news', 'hampton'];
+
+      if (location.includes('va') || location.includes('virginia') ||
+          virginiaHighCostAreas.some(area => description.includes(area)) ||
+          virginiaMidCostAreas.some(area => description.includes(area))) {
+
+        // Check if it's Northern Virginia (high cost)
+        if (virginiaHighCostAreas.some(area => location.includes(area) || description.includes(area))) {
+          minRealisticPrice = 800; // NoVa: even studios are rarely under $800
+        } else if (virginiaMidCostAreas.some(area => location.includes(area) || description.includes(area))) {
+          minRealisticPrice = 600; // Hampton Roads/Richmond: minimum around $600
+        } else {
+          minRealisticPrice = 500; // Other VA areas
+        }
+      }
+
+      // Extreme scam detection (universally impossible prices)
       if (price <= 10) {
-        // Extremely low prices are 100% scams - add MULTIPLE flags
         flags.push({
           severity: 'critical',
           message: '🚨 EXTREME SCAM ALERT: $' + price + '/month is impossible - DO NOT CONTACT',
@@ -143,16 +305,29 @@ function detectRedFlags(data) {
           message: '⛔ No legitimate rental costs $' + price + ' - This will steal your money/identity',
           category: 'price'
         });
-      } else if (price < 100) {
+      }
+      // Very suspicious prices
+      else if (price < 100) {
         flags.push({
           severity: 'critical',
           message: '🚨 Price is $' + price + ' - This is almost certainly a SCAM',
           category: 'price'
         });
-      } else if (price < 500) {
+      }
+      // Below market minimum (context-aware)
+      else if (price < minRealisticPrice * 0.5) {
+        // Price is less than 50% of realistic minimum
         flags.push({
           severity: 'high',
-          message: '💰 Price ($' + price + ') seems too low - possibly fake listing',
+          message: '💰 Price ($' + price + ') is far below market rate for this area - likely fake',
+          category: 'price'
+        });
+      }
+      else if (price < minRealisticPrice * 0.7) {
+        // Price is 50-70% of realistic minimum
+        flags.push({
+          severity: 'medium',
+          message: '⚠️ Price ($' + price + ') seems unusually low for this area - verify carefully',
           category: 'price'
         });
       }
@@ -194,14 +369,23 @@ function detectRedFlags(data) {
   }
 
   // Red Flag 7: No viewing/keys before payment
-  const noViewingFlags = ['send deposit first', 'pay before viewing', 'send money before', 'keys after payment', 'payment before viewing'];
+  const noViewingFlags = ['send deposit first', 'pay before viewing', 'send money before', 'keys after payment', 'payment before viewing', 'money first'];
+  let foundPaymentBeforeViewing = false;
+
   noViewingFlags.forEach(flag => {
     if (description.includes(flag)) {
-      flags.push({
-        severity: 'critical',
-        message: '🔑 Demands payment before viewing - MAJOR scam red flag',
-        category: 'payment'
-      });
+      // Check if it's a warning (legitimate landlords sometimes warn AGAINST this)
+      const warningPhrases = ['do not ' + flag, 'never ' + flag, 'don\'t ' + flag, 'avoid ' + flag, 'warning: ' + flag];
+      const isWarning = warningPhrases.some(warning => description.includes(warning));
+
+      if (!isWarning && !foundPaymentBeforeViewing) {
+        foundPaymentBeforeViewing = true;
+        flags.push({
+          severity: 'critical',
+          message: '🔑 Demands payment before viewing - MAJOR scam red flag',
+          category: 'payment'
+        });
+      }
     }
   });
 
@@ -226,6 +410,105 @@ function detectRedFlags(data) {
     });
   }
 
+  // Red Flag 10: Price per square foot analysis (if square footage available)
+  if (data.price && data.squareFootage) {
+    // Remove commas and extract the number (e.g., "$1,150" -> 1150)
+    const priceMatch = data.price.match(/\$([\d,]+)/);
+    if (priceMatch) {
+      const monthlyRent = parseInt(priceMatch[1].replace(/,/g, ''));
+      const pricePerSqFt = monthlyRent / data.squareFootage;
+
+      // Get location-based market rates ($/sq ft)
+      const location = (data.location || '').toLowerCase();
+      const description = data.description.toLowerCase();
+      let marketMin = 1.00; // Default US minimum
+      let marketMax = 2.50; // Default US maximum
+      let marketAvg = 1.75;
+      let areaName = "this area";
+
+      // Virginia-specific market rates
+      const virginiaHighCostAreas = ['arlington', 'fairfax', 'alexandria', 'reston', 'falls church', 'mclean', 'vienna', 'tysons'];
+      const virginiaMidCostAreas = ['richmond', 'virginia beach', 'norfolk', 'chesapeake', 'newport news', 'hampton'];
+
+      if (location.includes('va') || location.includes('virginia') ||
+          virginiaHighCostAreas.some(area => description.includes(area)) ||
+          virginiaMidCostAreas.some(area => description.includes(area))) {
+
+        if (virginiaHighCostAreas.some(area => location.includes(area) || description.includes(area))) {
+          // Northern Virginia: $2.00-$3.50/sq ft (avg ~$2.70)
+          marketMin = 2.00;
+          marketMax = 3.50;
+          marketAvg = 2.70;
+          areaName = "Northern Virginia";
+        } else if (virginiaMidCostAreas.some(area => location.includes(area) || description.includes(area))) {
+          // Hampton Roads/Richmond: $1.50-$2.50/sq ft (avg ~$2.00)
+          marketMin = 1.50;
+          marketMax = 2.50;
+          marketAvg = 2.00;
+          areaName = "this Virginia area";
+        } else {
+          // Other Virginia: $1.25-$2.25/sq ft (avg ~$1.75)
+          marketMin = 1.25;
+          marketMax = 2.25;
+          marketAvg = 1.75;
+          areaName = "Virginia";
+        }
+      }
+
+      // Determine if we're using estimated sq ft
+      // Check if square footage was explicitly stated or estimated
+      const hasExplicitSqFt = data.description.match(/(\d{1,4})\s*(sq\.?\s*ft|sqft|square feet)/i);
+      const hasDimensions = data.description.match(/(\d{1,2})\s*[xX×]\s*(\d{1,2})/);
+      const isEstimated = !hasExplicitSqFt && !hasDimensions;
+      const estimateNote = isEstimated ? ' (estimated)' : '';
+
+      // Analyze the price per square foot
+      if (pricePerSqFt < marketMin * 0.3) {
+        // Less than 30% of minimum market rate = SCAM
+        flags.push({
+          severity: 'critical',
+          message: `📐 ${monthlyRent}/${data.squareFootage}${estimateNote} sq ft = $${pricePerSqFt.toFixed(2)}/sq ft - impossibly low (market: $${marketMin}-$${marketMax}) - SCAM`,
+          category: 'price'
+        });
+      } else if (pricePerSqFt < marketMin * 0.6) {
+        // 30-60% of minimum = highly suspicious
+        flags.push({
+          severity: 'high',
+          message: `📐 $${pricePerSqFt.toFixed(2)}/sq ft${estimateNote} is extremely low for ${areaName} (market: $${marketMin}-$${marketMax})`,
+          category: 'price'
+        });
+      } else if (pricePerSqFt < marketMin) {
+        // Below minimum but above 60% = good deal but verify
+        flags.push({
+          severity: 'low',
+          message: `📐 Great deal! $${pricePerSqFt.toFixed(2)}/sq ft${estimateNote} is below market (${areaName} avg: $${marketAvg.toFixed(2)})`,
+          category: 'deal'
+        });
+      } else if (pricePerSqFt <= marketAvg) {
+        // At or below average = good deal
+        flags.push({
+          severity: 'info',
+          message: `✅ Good price: $${pricePerSqFt.toFixed(2)}/sq ft${estimateNote} (${areaName} avg: $${marketAvg.toFixed(2)})`,
+          category: 'deal'
+        });
+      } else if (pricePerSqFt <= marketMax) {
+        // Above average but within range = fair price
+        flags.push({
+          severity: 'info',
+          message: `💵 Fair price: $${pricePerSqFt.toFixed(2)}/sq ft${estimateNote} (market: $${marketMin.toFixed(2)}-$${marketMax.toFixed(2)})`,
+          category: 'deal'
+        });
+      } else {
+        // Above maximum = overpriced
+        flags.push({
+          severity: 'low',
+          message: `💸 Overpriced: $${pricePerSqFt.toFixed(2)}/sq ft${estimateNote} is above ${areaName} market (max: $${marketMax.toFixed(2)})`,
+          category: 'deal'
+        });
+      }
+    }
+  }
+
   return flags;
 }
 
@@ -238,13 +521,14 @@ function calculateSafetyScore(redFlags) {
     if (flag.severity === 'high') score -= 30;
     if (flag.severity === 'medium') score -= 15;
     if (flag.severity === 'low') score -= 5;
+    // 'info' severity doesn't affect score - just informational
   });
 
   return Math.max(0, score);
 }
 
 // Display the safety widget on the page
-function displaySafetyWidget(score, redFlags) {
+function displaySafetyWidget(score, redFlags, aiAnalysis) {
   // Remove any existing widget
   const existingWidget = document.getElementById('rental-safety-widget');
   if (existingWidget) {

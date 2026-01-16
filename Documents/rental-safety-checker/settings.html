@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Rental Safety Checker - Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #333;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+    .help-text {
+      font-size: 13px;
+      color: #666;
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+    .help-text a {
+      color: #4CAF50;
+      text-decoration: none;
+    }
+    .help-text a:hover {
+      text-decoration: underline;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      display: none;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .info-box {
+      background: #e7f3ff;
+      border-left: 4px solid #2196F3;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .info-box h3 {
+      margin-top: 0;
+      color: #1976D2;
+    }
+    .info-box ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .info-box li {
+      margin: 8px 0;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🏠 Rental Safety Checker Settings</h1>
+    <p class="subtitle">Configure AI-powered scam detection</p>
+
+    <div class="info-box">
+      <h3>🤖 AI Features</h3>
+      <ul>
+        <li><strong>Smart Pricing Analysis:</strong> Understands context (room vs apartment) for accurate pricing</li>
+        <li><strong>Scam Pattern Recognition:</strong> Detects sophisticated manipulation tactics</li>
+        <li><strong>Market Value Estimates:</strong> Provides fair market rent ranges for your area</li>
+        <li><strong>Property Details Extraction:</strong> Finds hidden size/amenity clues</li>
+      </ul>
+    </div>
+
+    <label for="apiKey">Claude API Key (Optional)</label>
+    <input
+      type="text"
+      id="apiKey"
+      placeholder="sk-ant-api03-..."
+      autocomplete="off"
+    />
+    <div class="help-text">
+      Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a><br>
+      Cost: ~$0.01-0.02 per listing analyzed (Claude Sonnet 3.5)<br>
+      <strong>Without API key:</strong> Extension uses pattern matching only (still effective!)
+    </div>
+
+    <button id="saveBtn">Save Settings</button>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
