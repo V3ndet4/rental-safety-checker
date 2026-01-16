@@ -1,0 +1,31 @@
+/* Rental Safety Checker Styles */
+
+#rental-safety-widget {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 999999;
+  max-width: 350px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.rental-safety-widget {
+  font-family: inherit;
+}
+
+/* Make sure it's always on top */
+#rental-safety-widget * {
+  box-sizing: border-box;
+}
